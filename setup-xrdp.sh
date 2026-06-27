@@ -121,21 +121,21 @@ ok "Đã thu thập xong cấu hình. Bắt đầu cài đặt..."
 # ============================================================
 # Bước 1: Cập nhật hệ thống
 # ============================================================
-info "Bоớc 1/11: Cập nhật hệ thống (pacman -Syu)..."
+info "Bước 1/11: Cập nhật hệ thống (pacman -Syu)..."
 sudo pacman -Syu --noconfirm
 ok "Đã cập nhật hệ thống."
 
 # ============================================================
 # Bước 2: Cài xrdp và xorgxrdp (qua paru / AUR)
 # ============================================================
-info "Bоớc 2/11: Cài đặt xrdp + xorgxrdp..."
+info "Bước 2/11: Cài đặt xrdp + xorgxrdp..."
 paru -S --noconfirm xrdp xorgxrdp
 ok "Đã cài xrdp + xorgxrdp."
 
 # ============================================================
 # Bước 3: Tạo chứng chỉ (cert) tự động
 # ============================================================
-info "Bоớc 3/11: Tạo cert..."
+info "Bước 3/11: Tạo cert..."
 if command -v xrdp-keygen &>/dev/null; then
   sudo xrdp-keygen xrdp auto && ok "Đã tạo cert." || warn "xrdp-keygen lỗi — bỏ qua, service sẽ tự tạo cert."
 else
@@ -145,14 +145,14 @@ fi
 # ============================================================
 # Bước 4: Kích hoạt dịch vụ xrdp
 # ============================================================
-info "Bоớc 4/11: Kích hoạt xrdp..."
+info "Bước 4/11: Kích hoạt xrdp..."
 sudo systemctl enable --now xrdp
 ok "xrdp đã được bật."
 
 # ============================================================
 # Bước 5: Đổi port trong /etc/xrdp/xrdp.ini
 # ============================================================
-info "Bоớc 5/11: Đặt port = ${XRDP_PORT}..."
+info "Bước 5/11: Đặt port = ${XRDP_PORT}..."
 # Chỉ thay dòng 'port=' ĐẦU TIÊN (nằm trong [Globals]), không đụng port của session
 sudo sed -i -E "0,/^port=.*/s//port=${XRDP_PORT}/" /etc/xrdp/xrdp.ini
 ok "Đã đặt port = ${XRDP_PORT}."
@@ -160,7 +160,7 @@ ok "Đã đặt port = ${XRDP_PORT}."
 # ============================================================
 # Bước 6: Cấu hình ~/.xinitrc theo Desktop Environment
 # ============================================================
-info "Bоớc 6/11: Ghi ~/.xinitrc..."
+info "Bước 6/11: Ghi ~/.xinitrc..."
 # Nếu chọn KDE Plasma (X11) thì đảm bảo có kwin-x11 (Arch đã tách kwin-x11/kwin-wayland)
 if [[ "$SESSION_CMD" == "exec startplasma-x11" ]]; then
   info "Đảm bảo có kwin-x11 cho phiên Plasma X11..."
@@ -181,14 +181,14 @@ ok "Đã ghi ~/.xinitrc với: $SESSION_CMD"
 # ============================================================
 # Bước 7: Khởi động lại xrdp
 # ============================================================
-info "Bоớc 7/11: Khởi động lại xrdp..."
+info "Bước 7/11: Khởi động lại xrdp..."
 sudo systemctl restart xrdp
 ok "Đã restart xrdp."
 
 # ============================================================
 # Bước 8: Tắt tường lửa ufw
 # ============================================================
-info "Bоớc 8/11: Tắt tường lửa..."
+info "Bước 8/11: Tắt tường lửa..."
 if command -v ufw &>/dev/null; then
   sudo ufw disable
   ok "Đã tắt ufw."
@@ -199,7 +199,7 @@ fi
 # ============================================================
 # Bước 9: Cấu hình IP tĩnh (tùy chọn) — qua nmcli (NetworkManager)
 # ============================================================
-info "Bоớc 9/11: Cấu hình IP tĩnh..."
+info "Bước 9/11: Cấu hình IP tĩnh..."
 if [[ "$STATIC_IP" == true ]]; then
   # Gộp DNS chính + phụ (nếu có)
   DNS_ALL="$DNS"
@@ -219,7 +219,7 @@ fi
 # ============================================================
 # Bước 10: Tắt auto sleep / hibernate (giữ máy luôn thức cho XRDP)
 # ============================================================
-info "Bоớc 10/11: Tắt auto sleep / hibernate..."
+info "Bước 10/11: Tắt auto sleep / hibernate..."
 sudo systemctl mask hibernate.target hybrid-sleep.target sleep.target suspend-then-hibernate.target suspend.target
 ok "Đã tắt sleep/hibernate (máy sẽ không tự ngủ)."
 
