@@ -356,17 +356,30 @@ ok "Đã tắt sleep/hibernate."
 
 case "$DE_KIND" in
   cinnamon)
-    if command -v gsettings &>/dev/null; then
-      runuser -u "$TARGET_USER" -- env HOME="$TARGET_HOME" \
-        dbus-run-session -- gsettings set org.cinnamon.desktop.screensaver lock-enabled false 2>/dev/null \
-        && ok "Đã tắt khóa màn hình cho Cinnamon." \
-        || warn "Không set được gsettings Cinnamon — bỏ qua (có thể chỉnh tay trong System Settings)."
-      runuser -u "$TARGET_USER" -- env HOME="$TARGET_HOME" \
-        dbus-run-session -- gsettings set org.cinnamon.desktop.session idle-delay 0 2>/dev/null || true
-      runuser -u "$TARGET_USER" -- env HOME="$TARGET_HOME" \
-        dbus-run-session -- gsettings set org.cinnamon.settings-daemon.plugins.power sleep-display-ac 0 2>/dev/null || true
+    if ! command -v gsettings &>/dev/null; then
+      warn "Không thấy gsettings — bỏ qua."
+    elif ! runuser -u "$TARGET_USER" -- env HOME="$TARGET_HOME" \
+           gsettings list-schemas 2>/dev/null | grep -q '^org.cinnamon.desktop.screensaver$'; then
+      warn "Chưa có schema org.cinnamon.* — Cinnamon chưa cài? Bỏ qua tắt lock."
     else
-      warn "Không thấy gsettings — bỏ qua tắt khóa màn hình Cinnamon."
+      # helper: set và BÁO LỖI nếu fail (không nuốt)
+      cset() {
+        if runuser -u "$TARGET_USER" -- env HOME="$TARGET_HOME" \
+             dbus-run-session -- gsettings set "$1" "$2" "$3"; then
+          ok "  $1 $2 = $3"
+        else
+          warn "  FAIL: $1 $2 = $3"
+        fi
+      }
+      cset org.cinnamon.desktop.screensaver  idle-activation-enabled false
+      cset org.cinnamon.desktop.screensaver  lock-enabled             false
+      cset org.cinnamon.desktop.lockdown     disable-lock-screen      true
+      cset org.cinnamon.desktop.session      idle-delay               0
+      cset org.cinnamon.settings-daemon.plugins.power sleep-display-ac       0
+      cset org.cinnamon.settings-daemon.plugins.power sleep-display-battery  0
+      cset org.cinnamon.settings-daemon.plugins.power sleep-inactive-ac-timeout      0
+      cset org.cinnamon.settings-daemon.plugins.power sleep-inactive-battery-timeout 0
+      ok "Đã cấu hình screensaver/DPMS cho Cinnamon."
     fi
     ;;
   plasma)
