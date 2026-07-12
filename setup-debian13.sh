@@ -42,7 +42,8 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # ---------- Xác định USER THƯỜNG sẽ remote vào ----------
-# Ưu tiên SUDO_USER (khi gọi qua sudo); nếu vào thẳng root (su -) thì lấy user UID 1000.
+# Ưu tiên SUDO_USER (khi gọi qua 'sudo ./setup...'); nếu vào thẳng root (su -) thì
+# lấy user UID 1000. Muốn ép rõ ràng khi chạy bằng root:  SUDO_USER=tp1 bash setup...
 TARGET_USER="${SUDO_USER:-}"
 if [[ -z "$TARGET_USER" || "$TARGET_USER" == "root" ]]; then
   TARGET_USER="$(getent passwd 1000 | cut -d: -f1)"
@@ -50,6 +51,9 @@ fi
 if [[ -z "$TARGET_USER" ]]; then
   read -rp "Nhập tên user thường sẽ remote vào (vd: nam): " TARGET_USER
 fi
+# Xác nhận (bấm Enter để dùng, hoặc gõ tên khác) — tránh đoán nhầm khi chạy bằng root.
+read -rp "User sẽ remote/cấu hình là '$TARGET_USER'? [Enter = đúng, hoặc gõ tên khác]: " _u
+[[ -n "${_u:-}" ]] && TARGET_USER="$_u"
 TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
 if [[ -z "$TARGET_HOME" || ! -d "$TARGET_HOME" ]]; then
   err "Không tìm thấy home của user '$TARGET_USER'. Dừng lại."
@@ -59,9 +63,32 @@ ok "User mục tiêu: $TARGET_USER  (home: $TARGET_HOME)"
 
 export DEBIAN_FRONTEND=noninteractive
 
+# Chọn công cụ hạ quyền xuống user thường. THỰC TẾ trên Debian 13: 'runuser'
+# reset môi trường quá sạch khiến GSettings không nạp được schema (list-schemas
+# trả 0), trong khi 'sudo -u' giữ đủ ngữ cảnh nên đọc/ghi đúng. Vì vậy ƯU TIÊN
+# 'sudo -u'; chỉ dùng 'runuser' khi máy không có sudo.
+if command -v sudo &>/dev/null; then
+  DROP_TOOL="sudo"
+elif command -v runuser &>/dev/null; then
+  DROP_TOOL="runuser"
+else
+  err "Máy này thiếu cả 'sudo' lẫn 'runuser' — không hạ quyền xuống '$TARGET_USER' được."
+  err "  Cài:  apt install -y sudo util-linux"
+  exit 1
+fi
+
+# as_user <cmd...> : chạy cmd dưới quyền $TARGET_USER, qua sudo -u hoặc runuser
+as_user() {
+  if [[ "$DROP_TOOL" == "sudo" ]]; then
+    sudo -u "$TARGET_USER" -- "$@"
+  else
+    runuser -u "$TARGET_USER" -- "$@"
+  fi
+}
+
 # Chạy 1 lệnh dưới quyền user thường (đặt sẵn HOME để ghi đúng ~/.config)
 run_user() {
-  runuser -u "$TARGET_USER" -- env HOME="$TARGET_HOME" "$@"
+  as_user env HOME="$TARGET_HOME" "$@"
 }
 
 # ---------- Cơ chế: chỉ tự xóa script + reboot KHI THÀNH CÔNG ----------
@@ -72,6 +99,9 @@ SETUP_SUCCESS=false
 finish() {
   local rc=$?
   echo
+  # Dù thành công hay thất bại: bỏ mask packagekit đã đặt ở prepare_apt (nếu có)
+  # để lần sau desktop tự cập nhật bình thường.
+  systemctl unmask packagekit.service 2>/dev/null || true
   if [[ "$SETUP_SUCCESS" != true ]]; then
     err "Cài đặt CHƯA hoàn tất (thoát với mã $rc) — sẽ KHÔNG tự động reboot."
     err "Xem thông báo lỗi ở phía trên. File script được giữ lại: $(realpath "$0" 2>/dev/null || echo "$0")"
@@ -199,6 +229,39 @@ ok "Đã thu thập xong cấu hình. Bắt đầu cài đặt..."
 set -eE
 trap 'err "LỖI ở dòng ${LINENO} (mã $?): lệnh \"${BASH_COMMAND}\" — DỪNG, sẽ không tự reboot."' ERR
 
+# ---------- Dọn đường cho apt: chặn packagekit/apt-daily giữ lock ----------
+# Trên Debian desktop, ngay sau khi boot/login, packagekitd (GNOME/Cinnamon) và
+# các timer apt-daily tự chạy để refresh cập nhật → GIỮ /var/lib/dpkg/lock-frontend.
+# Nếu script gọi apt đúng lúc đó, apt sẽ kẹt "Waiting for cache lock" và có thể
+# fail → do 'set -eE' ở trên, cả script CHẾT ngay Bước 1/13.
+# Hàm này dừng hẳn các dịch vụ đó và đặt lock timeout để apt tự chờ thay vì fail.
+prepare_apt() {
+  info "Tạm dừng dịch vụ tự cập nhật (packagekit, apt-daily) để tránh kẹt lock dpkg..."
+  systemctl stop  packagekit.service unattended-upgrades.service \
+                  apt-daily.service apt-daily-upgrade.service \
+                  apt-daily.timer  apt-daily-upgrade.timer 2>/dev/null || true
+  # Chặn packagekit tự bật lại giữa chừng (finish() sẽ unmask lại khi script kết thúc).
+  systemctl mask  packagekit.service 2>/dev/null || true
+
+  # Nếu ngay lúc này vẫn còn tiến trình giữ lock (đang refresh dở), chờ tối đa 60s.
+  local waited=0
+  while fuser /var/lib/dpkg/lock-frontend &>/dev/null || \
+        fuser /var/lib/dpkg/lock          &>/dev/null || \
+        fuser /var/lib/apt/lists/lock     &>/dev/null; do
+    if (( waited >= 60 )); then
+      warn "Sau 60s vẫn còn tiến trình giữ lock dpkg — vẫn tiếp tục (apt sẽ tự chờ theo timeout)."
+      break
+    fi
+    info "  Đang chờ tiến trình khác thả lock dpkg... (${waited}s)"
+    sleep 3; waited=$((waited+3))
+  done
+
+  # Cho MỌI lệnh apt trong script tự chờ lock tối đa 300s thay vì fail ngay lập tức.
+  echo 'DPkg::Lock::Timeout "300";' > /etc/apt/apt.conf.d/99tp-lock-timeout
+  ok "Đã dọn đường cho apt (packagekit đã dừng, lock timeout = 300s)."
+}
+prepare_apt
+
 # Hàm bật contrib + non-free + non-free-firmware (cần cho driver/firmware đóng)
 enable_nonfree_repos() {
   info "Bật kho contrib + non-free + non-free-firmware..."
@@ -232,8 +295,7 @@ apt update
 # linux-image-* đổi → 'upgrade' sẽ GIỮ LẠI kernel cũ, còn 'full-upgrade' mới cài
 # kernel mới. Nếu để lệch, headers (kéo về theo kernel mới nhất) sẽ không khớp
 # kernel đang chạy → DKMS build module cho kernel không boot vào → nvidia-smi lỗi.
-
-# apt -y full-upgrade
+apt -y full-upgrade
 ok "Đã cập nhật hệ thống."
 
 # ============================================================
@@ -357,30 +419,31 @@ ok "Đã tắt sleep/hibernate."
 
 case "$DE_KIND" in
   cinnamon)
-    if ! command -v gsettings &>/dev/null; then
-      warn "Không thấy gsettings — bỏ qua."
-    elif ! runuser -u "$TARGET_USER" -- env HOME="$TARGET_HOME" \
-           gsettings list-schemas 2>/dev/null | grep -q '^org.cinnamon.desktop.screensaver$'; then
-      warn "Chưa có schema org.cinnamon.* — Cinnamon chưa cài? Bỏ qua tắt lock."
+    # gsettings phải chạy BẰNG CHÍNH user trong phiên GUI của họ (không phải root),
+    # nếu không dconf báo "failed to commit: connection is closed". Script này chạy
+    # bằng root → gọi qua 'sudo -u' và truyền 3 biến bắt buộc:
+    #   HOME (dconf ghi đúng ~/.config), XDG_DATA_DIRS (tìm schema), DBUS...BUS (commit).
+    BUS="/run/user/$(id -u "$TARGET_USER")/bus"
+    if command -v gsettings &>/dev/null && [[ -S "$BUS" ]]; then
+      info "  Cấu hình Cinnamon (screensaver/lock/sleep) cho '$TARGET_USER'..."
+      sudo -u "$TARGET_USER" env \
+        HOME="$TARGET_HOME" \
+        XDG_DATA_DIRS="/usr/local/share:/usr/share" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=$BUS" \
+        bash <<'EOF'
+gsettings set org.cinnamon.desktop.screensaver idle-activation-enabled false
+gsettings set org.cinnamon.desktop.screensaver lock-enabled false
+gsettings set org.cinnamon.desktop.session idle-delay 0
+gsettings set org.cinnamon.settings-daemon.plugins.power lock-on-suspend false
+gsettings set org.cinnamon.settings-daemon.plugins.power sleep-display-ac 0
+gsettings set org.cinnamon.settings-daemon.plugins.power sleep-display-battery 0
+gsettings set org.cinnamon.settings-daemon.plugins.power sleep-inactive-ac-timeout 0
+gsettings set org.cinnamon.settings-daemon.plugins.power sleep-inactive-battery-timeout 0
+gsettings set org.cinnamon.settings-daemon.plugins.power button-power 'shutdown'
+EOF
+      ok "Đã cấu hình Cinnamon."
     else
-      # helper: set và BÁO LỖI nếu fail (không nuốt)
-      cset() {
-        if runuser -u "$TARGET_USER" -- env HOME="$TARGET_HOME" \
-             dbus-run-session -- gsettings set "$1" "$2" "$3"; then
-          ok "  $1 $2 = $3"
-        else
-          warn "  FAIL: $1 $2 = $3"
-        fi
-      }
-      cset org.cinnamon.desktop.screensaver  idle-activation-enabled false
-      cset org.cinnamon.desktop.screensaver  lock-enabled             false
-      cset org.cinnamon.desktop.lockdown     disable-lock-screen      true
-      cset org.cinnamon.desktop.session      idle-delay               0
-      cset org.cinnamon.settings-daemon.plugins.power sleep-display-ac       0
-      cset org.cinnamon.settings-daemon.plugins.power sleep-display-battery  0
-      cset org.cinnamon.settings-daemon.plugins.power sleep-inactive-ac-timeout      0
-      cset org.cinnamon.settings-daemon.plugins.power sleep-inactive-battery-timeout 0
-      ok "Đã cấu hình screensaver/DPMS cho Cinnamon."
+      warn "Bỏ qua Cinnamon: cần phiên GUI đang chạy của '$TARGET_USER' (bus $BUS) và gsettings."
     fi
     ;;
   plasma)
@@ -403,11 +466,11 @@ EOF
     ;;
   gnome)
     if command -v gsettings &>/dev/null; then
-      runuser -u "$TARGET_USER" -- env HOME="$TARGET_HOME" \
+      as_user env HOME="$TARGET_HOME" \
         dbus-run-session -- gsettings set org.gnome.desktop.screensaver lock-enabled false 2>/dev/null \
         && ok "Đã tắt khóa màn hình cho GNOME." \
         || warn "Không set được gsettings — bỏ qua (có thể chỉnh tay trong Settings)."
-      runuser -u "$TARGET_USER" -- env HOME="$TARGET_HOME" \
+      as_user env HOME="$TARGET_HOME" \
         dbus-run-session -- gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null || true
     else
       warn "Không thấy gsettings — bỏ qua tắt khóa màn hình GNOME."
