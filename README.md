@@ -32,7 +32,7 @@ wget -qO setup-debian13.sh https://raw.githubusercontent.com/nhndev110/linux-sup
 
 ---
 
-## Support Kit — Menu xử lý sự cố
+## Menu xử lý sự cố
 
 Tải và chạy script menu (gồm cấu hình DNS và các chức năng bổ sung sau):
 
@@ -41,4 +41,4 @@ curl -fsSL -o /tmp/support-kit.sh https://raw.githubusercontent.com/nhndev110/li
 bash /tmp/support-kit.sh
 ```
 
-> 💡 Xem danh sách **các chức năng** của menu tại [Support-Linux.md](Support-Linux.md#support-kit--menu-xử-lý-sự-cố).
+> 💡 Xem danh sách **các chức năng** của menu tại [Support-Linux.md](Support-Linux.md#menu-xử-lý-sự-cố).

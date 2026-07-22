@@ -4,9 +4,9 @@ Tài liệu tra cứu nhanh các lệnh xử lý sự cố trên máy chủ Linu
 
 ---
 
-## Support Kit — Menu xử lý sự cố
+## Menu xử lý sự cố
 
-> 💡 Lệnh tải & chạy script menu xem tại [README.md](README.md#support-kit--menu-xử-lý-sự-cố).
+> 💡 Lệnh tải & chạy script menu xem tại [README.md](README.md#menu-xử-lý-sự-cố).
 
 Các chức năng có trong `scripts-support-kit.sh`:
 
