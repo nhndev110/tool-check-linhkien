@@ -30,6 +30,11 @@ sudo wipefs -a /dev/nvme0n1
 sudo sgdisk --zap-all /dev/nvme0n1
 ```
 
+```bash
+sudo wipefs -a /dev/nvme0n1
+sudo parted /dev/nvme0n1 mklabel msdos
+```
+
 ---
 
 ## Đổi mật khẩu cho user và root

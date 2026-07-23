@@ -63,11 +63,14 @@ wipe_nvme() {
     read -rp "Gõ đúng tên ổ '$DISK' để xác nhận: " ANSWER
     [ "$ANSWER" != "$DISK" ] && { echo "Không khớp, đã hủy."; return 1; }
 
-    sudo swapoff -a
-    sudo vgchange -an
-    sudo dmsetup remove_all
+    # sudo swapoff -a
+    # sudo vgchange -an
+    # sudo dmsetup remove_all
+    # sudo wipefs -a "/dev/$DISK"
+    # sudo sgdisk --zap-all "/dev/$DISK"
+
     sudo wipefs -a "/dev/$DISK"
-    sudo sgdisk --zap-all "/dev/$DISK"
+    sudo parted "/dev/$DISK" mklabel msdos
     echo "✔ Đã xóa sạch /dev/$DISK."
 }
 
